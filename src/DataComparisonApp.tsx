@@ -70,7 +70,7 @@ const DataImportForm = ({
     // First read the file as text to examine its structure
     const reader = new FileReader();
     reader.onload = (e) => {
-      const fileText = e.target.result;
+      const fileText = e.target!.result as string;
 
       // Split into lines and take into account the start row
       const lines = fileText.split("\n").filter((line) => line.trim() !== "");
@@ -366,9 +366,9 @@ const DataComparisonApp = () => {
   const [slopeLineSize, setSlopeLineSize] = useState(2000);
   const [slopeSmoothingPoints, setSlopeSmoothingPoints] = useState(1);
   const [showSlopeTool, setShowSlopeTool] = useState(false);
-  const [currentSlope, setCurrentSlope] = useState(null);
-  const [hoveredPoint, setHoveredPoint] = useState(null);
-  const [fixedPoint, setFixedPoint] = useState(null);
+  const [currentSlope, setCurrentSlope] = useState<number | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<any>(null);
+  const [fixedPoint, setFixedPoint] = useState<any>(null);
 
   // New state for integral functionality
   const [integralBoxes, setIntegralBoxes] = useState([
@@ -1346,12 +1346,12 @@ const DataComparisonApp = () => {
   // Function to create a combined dataset from existing datasets
   const createCombinedDataset = () => {
     // Get the form elements with the correct IDs
-    const firstDatasetId = document.getElementById("datasetA").value;
-    const secondDatasetId = document.getElementById("datasetB").value;
-    const thirdDatasetId = document.getElementById("datasetC")?.value || null;
-    const fourthDatasetId = document.getElementById("datasetD")?.value || null;
-    const customEquation = document.getElementById("customEquation").value;
-    const newDatasetName = document.getElementById("newDatasetName").value;
+    const firstDatasetId = (document.getElementById("datasetA") as HTMLInputElement).value;
+    const secondDatasetId = (document.getElementById("datasetB") as HTMLInputElement).value;
+    const thirdDatasetId = (document.getElementById("datasetC") as HTMLInputElement)?.value || null;
+    const fourthDatasetId = (document.getElementById("datasetD") as HTMLInputElement)?.value || null;
+    const customEquation = (document.getElementById("customEquation") as HTMLInputElement).value;
+    const newDatasetName = (document.getElementById("newDatasetName") as HTMLInputElement).value;
 
     // Validate input
     if (!firstDatasetId) {
@@ -1621,7 +1621,7 @@ const DataComparisonApp = () => {
 
     // Create a new dataset with the combined data
     const defaultName = `Combined: ${customEquation}`;
-    const resultYAxis = document.getElementById("resultYAxis")?.value || "left";
+    const resultYAxis = (document.getElementById("resultYAxis") as HTMLInputElement)?.value || "left";
 
     const newDataset = {
       id: Date.now(),
@@ -1648,19 +1648,19 @@ const DataComparisonApp = () => {
     setXOffsets((prev) => ({ ...prev, [newDataset.id]: 0 }));
 
     // Reset the form
-    document.getElementById("datasetA").value = "";
-    document.getElementById("datasetB").value = "";
+    (document.getElementById("datasetA") as HTMLInputElement).value = "";
+    (document.getElementById("datasetB") as HTMLInputElement).value = "";
     if (document.getElementById("datasetC")) {
-      document.getElementById("datasetC").value = "";
+      (document.getElementById("datasetC") as HTMLInputElement).value = "";
     }
     if (document.getElementById("datasetD")) {
-      document.getElementById("datasetD").value = "";
+      (document.getElementById("datasetD") as HTMLInputElement).value = "";
     }
     if (document.getElementById("resultYAxis")) {
-      document.getElementById("resultYAxis").value = "left";
+      (document.getElementById("resultYAxis") as HTMLInputElement).value = "left";
     }
-    document.getElementById("customEquation").value = "";
-    document.getElementById("newDatasetName").value = "";
+    (document.getElementById("customEquation") as HTMLInputElement).value = "";
+    (document.getElementById("newDatasetName") as HTMLInputElement).value = "";
 
     // Alert success
     alert(
@@ -1712,7 +1712,7 @@ const DataComparisonApp = () => {
     // Read the file as text to process it
     const reader = new FileReader();
     reader.onload = (e) => {
-      const fileText = e.target.result;
+      const fileText = e.target!.result as string;
 
       // Split into lines and filter out empty lines
       const lines = fileText.split("\n").filter((line) => line.trim() !== "");
@@ -2007,7 +2007,7 @@ const DataComparisonApp = () => {
 
   // Add slope visualization if enabled
   // Add slope visualization if enabled
-  let slopeVisual = [];
+  let slopeVisual: any[] = [];
   if (showSlopeTool && (hoveredPoint || fixedPoint)) {
     const point = fixedPoint || hoveredPoint;
     if (point && point.slope !== undefined) {
@@ -2224,19 +2224,19 @@ const DataComparisonApp = () => {
   const config = {
     responsive: true,
     displayModeBar: true,
-    modeBarButtonsToAdd: ["zoom2d", "pan2d", "resetScale2d"],
+    modeBarButtonsToAdd: ["zoom2d", "pan2d", "resetScale2d"] as any,
     plotGlPixelRatio: 2, // Increase rendering resolution
     showSendToCloud: false, // Reduce overhead
   };
 
   // Dataset box style that matches the mockup
-  const datasetBoxStyle = {
+  const datasetBoxStyle: React.CSSProperties = {
     border: "1px solid #00f",
     backgroundColor: "#def",
     padding: "8px",
     marginBottom: "10px",
     display: "inline-block",
-    width: "320px", // Increased width to ensure Reset button fits
+    width: "320px",
     verticalAlign: "top",
     marginRight: "5px",
     position: "relative",
