@@ -488,7 +488,7 @@ const DataComparisonApp = () => {
           // Use Plotly's relayout method to apply the preserved layout
           const plot = plotRef.current.el;
           if (plot && plot.layout) {
-            Plotly.relayout(plot, layoutCopy);
+            (window as any).Plotly.relayout(plot, layoutCopy);
           }
         }
       });
@@ -606,7 +606,7 @@ const DataComparisonApp = () => {
 
   // Add cursor movement functions
   const moveCursor = (cursorNumber, direction) => {
-    const stepValue = parseFloat(cursorStep) || 0.001;
+    const stepValue = parseFloat(String(cursorStep)) || 0.001;
 
     if (cursorNumber === 1 && cursor1 !== null) {
       if (xAxisScale === "log") {
@@ -899,7 +899,7 @@ const DataComparisonApp = () => {
       if (!eq.isActive || !eq.equation.trim()) return;
 
       // 1) Collect union of all X from non-equation datasets
-      let allXValues = new Set();
+      let allXValues = new Set<number>();
       datasets.forEach((ds) => {
         if (ds.isEquation) return; // skip other eq if you want
         ds.data.forEach((row) => {
@@ -1181,7 +1181,7 @@ const DataComparisonApp = () => {
     });
 
     // Collect all x-values within the visible range across all datasets
-    let allXValues = new Set();
+    let allXValues = new Set<number>();
 
     actualPlotDatasets.forEach((plotData) => {
       if (plotData.x && plotData.x.length > 0) {
