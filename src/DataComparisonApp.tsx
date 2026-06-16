@@ -2302,7 +2302,7 @@ const DataComparisonApp = () => {
     .filter(p => p.x !== null)
     .map(p => ({
       x: [p.x], y: [p.y],
-      type: "scattergl" as const, mode: "markers+text" as const,
+      type: "scatter" as const, mode: "markers+text" as const,
       marker: { color: p.dotColor, size: p.dotSize },
       text: [p.name], textposition: "top center" as const,
       showlegend: false, hoverinfo: "text" as const,
