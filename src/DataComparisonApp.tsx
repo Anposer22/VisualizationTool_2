@@ -70,7 +70,7 @@ const DataImportForm = ({
     // First read the file as text to examine its structure
     const reader = new FileReader();
     reader.onload = (e) => {
-      const fileText = e.target.result;
+      const fileText = e.target!.result as string;
 
       // Split into lines and take into account the start row
       const lines = fileText.split("\n").filter((line) => line.trim() !== "");
@@ -363,12 +363,34 @@ const DataComparisonApp = () => {
 
   // Slope tool state
   const [showSlope, setShowSlope] = useState(false);
-  const [slopeLineSize, setSlopeLineSize] = useState(2000);
-  const [slopeSmoothingPoints, setSlopeSmoothingPoints] = useState(1);
   const [showSlopeTool, setShowSlopeTool] = useState(false);
-  const [currentSlope, setCurrentSlope] = useState(null);
-  const [hoveredPoint, setHoveredPoint] = useState(null);
-  const [fixedPoint, setFixedPoint] = useState(null);
+  const [slopeMeasurements, setSlopeMeasurements] = useState<any[]>([
+    { id: 1, name: "slope1", color: "#ff0000", smoothingPoints: 1, lineSize: 50, fixedPoint: null, value: null }
+  ]);
+  const [nextSlopeMeasurementId, setNextSlopeMeasurementId] = useState(2);
+  const [activeSlopeMeasurementId, setActiveSlopeMeasurementId] = useState(1);
+
+  // Order of the reorderable tool blocks (drag the gray handle on the left)
+  const [blockOrder, setBlockOrder] = useState<string[]>([
+    "cursors",
+    "dataSeries",
+    "slope",
+    "combined",
+    "customEq",
+    "axisTitles",
+    "export",
+    "integral",
+    "calculations",
+    "axisScale",
+  ]);
+  const [draggingBlock, setDraggingBlock] = useState<string | null>(null);
+
+  const [hoveredPoint, setHoveredPoint] = useState<any>(null);
+  const [calcPoints, setCalcPoints] = useState<any[]>([]);
+  const [nextCalcPointId, setNextCalcPointId] = useState(1);
+  const [calcExpressions, setCalcExpressions] = useState<any[]>([]);
+  const [nextCalcExprId, setNextCalcExprId] = useState(1);
+  const [selectingCalcPointId, setSelectingCalcPointId] = useState<number | null>(null);
 
   // New state for integral functionality
   const [integralBoxes, setIntegralBoxes] = useState([
@@ -424,6 +446,60 @@ const DataComparisonApp = () => {
         setDatasets((prev) => prev.filter((ds) => ds.id !== datasetId));
       }
     }, 0);
+  };
+
+  const addSlopeMeasurement = () => {
+    const id = nextSlopeMeasurementId;
+    setSlopeMeasurements(prev => [...prev, {
+      id, name: `slope${id}`,
+      color: "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0"),
+      smoothingPoints: 1, lineSize: 50, fixedPoint: null, value: null
+    }]);
+    setNextSlopeMeasurementId(prev => prev + 1);
+    setActiveSlopeMeasurementId(id);
+  };
+  const removeSlopeMeasurement = (id) => {
+    setSlopeMeasurements(prev => {
+      const remaining = prev.filter(m => m.id !== id);
+      if (activeSlopeMeasurementId === id && remaining.length > 0) {
+        setActiveSlopeMeasurementId(remaining[0].id);
+      }
+      return remaining;
+    });
+  };
+  const updateSlopeMeasurement = (id, updates) => {
+    setSlopeMeasurements(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+  };
+  const addCalcPoint = () => {
+    const id = nextCalcPointId;
+    setCalcPoints(prev => [...prev, { id, name: `P${id}`, x: null, y: null, dotColor: "#0000ff", dotSize: 8 }]);
+    setNextCalcPointId(prev => prev + 1);
+  };
+  const removeCalcPoint = (id) => setCalcPoints(prev => prev.filter(p => p.id !== id));
+  const updateCalcPoint = (id, updates) => setCalcPoints(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  const addCalcExpression = () => {
+    const id = nextCalcExprId;
+    setCalcExpressions(prev => [...prev, { id, name: `result${id}`, expression: "" }]);
+    setNextCalcExprId(prev => prev + 1);
+  };
+  const removeCalcExpression = (id) => setCalcExpressions(prev => prev.filter(e => e.id !== id));
+  const evaluateCalcExpressions = (exprs, points, slopes) => {
+    const ctx: any = {};
+    points.forEach(p => { if (p.name && p.x !== null) ctx[p.name] = { x: p.x, y: p.y }; });
+    slopes.forEach(m => { if (m.name && m.value !== null) ctx[m.name] = m.value; });
+    return exprs.map(expr => {
+      let result: any = null;
+      if (expr.expression && expr.expression.trim()) {
+        try {
+          const keys = Object.keys(ctx);
+          const vals = Object.values(ctx);
+          const fn = (Function as any).apply(null, keys.concat([`const {sin,cos,tan,pow,sqrt,abs,log,exp,PI}=Math; return (${expr.expression});`]));
+          result = fn.apply(null, vals);
+        } catch {}
+      }
+      if (expr.name && result !== null) ctx[expr.name] = result;
+      return { ...expr, result };
+    });
   };
 
   // Handle changes to the name or equation fields
@@ -488,7 +564,7 @@ const DataComparisonApp = () => {
           // Use Plotly's relayout method to apply the preserved layout
           const plot = plotRef.current.el;
           if (plot && plot.layout) {
-            Plotly.relayout(plot, layoutCopy);
+            (window as any).Plotly.relayout(plot, layoutCopy);
           }
         }
       });
@@ -543,9 +619,6 @@ const DataComparisonApp = () => {
   // Handle plot updates and zoom preservation
   // Handle plot updates and zoom preservation
   const handlePlotUpdate = (e) => {
-    // Don't update layout when slope tool is active to preserve zoom
-    if (showSlopeTool) return;
-
     if (e && e.layout) {
       // Check if we have a valid layout update
       let shouldUpdateLayout = false;
@@ -606,7 +679,7 @@ const DataComparisonApp = () => {
 
   // Add cursor movement functions
   const moveCursor = (cursorNumber, direction) => {
-    const stepValue = parseFloat(cursorStep) || 0.001;
+    const stepValue = parseFloat(String(cursorStep)) || 0.001;
 
     if (cursorNumber === 1 && cursor1 !== null) {
       if (xAxisScale === "log") {
@@ -644,7 +717,7 @@ const DataComparisonApp = () => {
   // Function to calculate derivative at a point
   // Function to calculate derivative at a point
   // Function to calculate derivative at a point
-  const calculateDerivativeAtPoint = (datasetId, xValue) => {
+  const calculateDerivativeAtPoint = (datasetId, xValue, smoothingPoints = 1) => {
     const dataset = datasets.find((ds) => ds.id === datasetId);
     if (!dataset) return null;
 
@@ -676,7 +749,7 @@ const DataComparisonApp = () => {
     if (closestIndex === -1) return null;
 
     // Calculate how many points to average on each side
-    const pointsToAverage = Math.max(1, Math.floor(slopeSmoothingPoints / 2));
+    const pointsToAverage = Math.max(1, Math.floor(smoothingPoints / 2));
 
     // Get average of points before current point
     let avgPointBefore = { x: 0, y: 0 };
@@ -757,7 +830,6 @@ const DataComparisonApp = () => {
   // Create debounced version of hover update
   const debouncedHoverUpdate = debounce((derivativeInfo) => {
     setHoveredPoint(derivativeInfo);
-    setCurrentSlope(derivativeInfo ? derivativeInfo.slope : null);
   }, 50); // 50ms delay
 
   // Function to calculate the integral for a specific plot between cursors
@@ -899,7 +971,7 @@ const DataComparisonApp = () => {
       if (!eq.isActive || !eq.equation.trim()) return;
 
       // 1) Collect union of all X from non-equation datasets
-      let allXValues = new Set();
+      let allXValues = new Set<number>();
       datasets.forEach((ds) => {
         if (ds.isEquation) return; // skip other eq if you want
         ds.data.forEach((row) => {
@@ -1025,12 +1097,10 @@ const DataComparisonApp = () => {
     });
   }, [customEquations, xOffsets]); // Remove datasets from dependencies
 
-  // Reset fixed point when tool is toggled off
+  // Reset hover when slope tool is toggled off
   useEffect(() => {
     if (!showSlopeTool) {
-      setFixedPoint(null);
       setHoveredPoint(null);
-      setCurrentSlope(null);
     }
   }, [showSlopeTool]);
 
@@ -1062,6 +1132,14 @@ const DataComparisonApp = () => {
   // Simplified plot click handler for cursor positioning
   const handlePlotClick = (e) => {
     if (!e.points || !e.points[0]) return;
+
+    // Handle calc point selection
+    if (selectingCalcPointId !== null) {
+      const pt = e.points[0];
+      updateCalcPoint(selectingCalcPointId, { x: pt.x, y: pt.y });
+      setSelectingCalcPointId(null);
+      return;
+    }
 
     // Handle cursor functionality
     if (showCursors) {
@@ -1099,23 +1177,29 @@ const DataComparisonApp = () => {
 
     // Handle slope tool functionality
     if (showSlopeTool && hoveredPoint) {
-      setFixedPoint(hoveredPoint);
+      setSlopeMeasurements(prev => prev.map(m =>
+        m.id === activeSlopeMeasurementId
+          ? { ...m, fixedPoint: hoveredPoint, value: hoveredPoint.slope }
+          : m
+      ));
     }
   };
 
   const handlePlotHover = (e) => {
-    if (!showSlopeTool || fixedPoint) return;
+    if (!showSlopeTool) return;
+    const activeM = slopeMeasurements.find(m => m.id === activeSlopeMeasurementId);
+    if (!activeM || activeM.fixedPoint) return;
 
     if (e.points && e.points[0] && e.points[0].curveNumber !== undefined) {
       const pointData = e.points[0];
       const datasetIndex = pointData.curveNumber;
 
-      // Make sure it's a dataset curve, not an integral or slope visual
       if (datasetIndex < datasets.length) {
         const dataset = datasets[datasetIndex];
         const derivativeInfo = calculateDerivativeAtPoint(
           dataset.id,
-          pointData.x
+          pointData.x,
+          activeM.smoothingPoints
         );
 
         if (derivativeInfo) {
@@ -1126,8 +1210,9 @@ const DataComparisonApp = () => {
   };
 
   const handlePlotUnhover = () => {
-    if (!showSlopeTool || fixedPoint) return;
-    if (!fixedPoint) {
+    if (!showSlopeTool) return;
+    const activeM = slopeMeasurements.find(m => m.id === activeSlopeMeasurementId);
+    if (!activeM || !activeM.fixedPoint) {
       debouncedHoverUpdate(null);
     }
   };
@@ -1181,7 +1266,7 @@ const DataComparisonApp = () => {
     });
 
     // Collect all x-values within the visible range across all datasets
-    let allXValues = new Set();
+    let allXValues = new Set<number>();
 
     actualPlotDatasets.forEach((plotData) => {
       if (plotData.x && plotData.x.length > 0) {
@@ -1346,12 +1431,12 @@ const DataComparisonApp = () => {
   // Function to create a combined dataset from existing datasets
   const createCombinedDataset = () => {
     // Get the form elements with the correct IDs
-    const firstDatasetId = document.getElementById("datasetA").value;
-    const secondDatasetId = document.getElementById("datasetB").value;
-    const thirdDatasetId = document.getElementById("datasetC")?.value || null;
-    const fourthDatasetId = document.getElementById("datasetD")?.value || null;
-    const customEquation = document.getElementById("customEquation").value;
-    const newDatasetName = document.getElementById("newDatasetName").value;
+    const firstDatasetId = (document.getElementById("datasetA") as HTMLInputElement).value;
+    const secondDatasetId = (document.getElementById("datasetB") as HTMLInputElement).value;
+    const thirdDatasetId = (document.getElementById("datasetC") as HTMLInputElement)?.value || null;
+    const fourthDatasetId = (document.getElementById("datasetD") as HTMLInputElement)?.value || null;
+    const customEquation = (document.getElementById("customEquation") as HTMLInputElement).value;
+    const newDatasetName = (document.getElementById("newDatasetName") as HTMLInputElement).value;
 
     // Validate input
     if (!firstDatasetId) {
@@ -1621,7 +1706,7 @@ const DataComparisonApp = () => {
 
     // Create a new dataset with the combined data
     const defaultName = `Combined: ${customEquation}`;
-    const resultYAxis = document.getElementById("resultYAxis")?.value || "left";
+    const resultYAxis = (document.getElementById("resultYAxis") as HTMLInputElement)?.value || "left";
 
     const newDataset = {
       id: Date.now(),
@@ -1648,19 +1733,19 @@ const DataComparisonApp = () => {
     setXOffsets((prev) => ({ ...prev, [newDataset.id]: 0 }));
 
     // Reset the form
-    document.getElementById("datasetA").value = "";
-    document.getElementById("datasetB").value = "";
+    (document.getElementById("datasetA") as HTMLInputElement).value = "";
+    (document.getElementById("datasetB") as HTMLInputElement).value = "";
     if (document.getElementById("datasetC")) {
-      document.getElementById("datasetC").value = "";
+      (document.getElementById("datasetC") as HTMLInputElement).value = "";
     }
     if (document.getElementById("datasetD")) {
-      document.getElementById("datasetD").value = "";
+      (document.getElementById("datasetD") as HTMLInputElement).value = "";
     }
     if (document.getElementById("resultYAxis")) {
-      document.getElementById("resultYAxis").value = "left";
+      (document.getElementById("resultYAxis") as HTMLInputElement).value = "left";
     }
-    document.getElementById("customEquation").value = "";
-    document.getElementById("newDatasetName").value = "";
+    (document.getElementById("customEquation") as HTMLInputElement).value = "";
+    (document.getElementById("newDatasetName") as HTMLInputElement).value = "";
 
     // Alert success
     alert(
@@ -1712,7 +1797,7 @@ const DataComparisonApp = () => {
     // Read the file as text to process it
     const reader = new FileReader();
     reader.onload = (e) => {
-      const fileText = e.target.result;
+      const fileText = e.target!.result as string;
 
       // Split into lines and filter out empty lines
       const lines = fileText.split("\n").filter((line) => line.trim() !== "");
@@ -2006,119 +2091,39 @@ const DataComparisonApp = () => {
   };
 
   // Add slope visualization if enabled
-  // Add slope visualization if enabled
-  let slopeVisual = [];
-  if (showSlopeTool && (hoveredPoint || fixedPoint)) {
-    const point = fixedPoint || hoveredPoint;
-    if (point && point.slope !== undefined) {
-      // Get aspect ratio for proper visualization
-      const aspectRatio = getAspectRatioCorrection();
-
-      // The line should have constant visual length
-      // Scale the line size to be more reasonable (divide by 10 for better default scale)
-      const totalLineLength = slopeLineSize * 10000;
-      const halfLength = totalLineLength / 2;
-
-      // Vector from previous to current point
-      const dx = point.x - point.previousX;
-      const dy = point.y - point.previousY;
-
-      // If we have a real previous point (not the same as current)
-      if (dx !== 0 || dy !== 0) {
-        // Normalize the direction considering aspect ratio
-        const adjustedDy = dy * aspectRatio;
-        const length = Math.sqrt(dx * dx + adjustedDy * adjustedDy);
-
-        // Normalized direction components
-        const normDx = dx / length;
-        const normDy = adjustedDy / length;
-
-        // Calculate endpoints maintaining constant visual length
-        const startX = point.x - normDx * halfLength;
-        const startY = point.y - (normDy * halfLength) / aspectRatio;
-        const endX = point.x + normDx * halfLength;
-        const endY = point.y + (normDy * halfLength) / aspectRatio;
-
-        // Add the slope line
-        slopeVisual.push({
-          x: [startX, endX],
-          y: [startY, endY],
-          type: "scattergl",
-          mode: "lines",
-          line: { color: "red", width: 3 },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-
-        // Add markers for the two reference points
-        slopeVisual.push({
-          x: [point.previousX, point.x],
-          y: [point.previousY, point.y],
-          type: "scattergl",
-          mode: "markers",
-          marker: {
-            color: ["blue", "red"],
-            size: [6, 8],
-            symbol: ["circle", "circle"],
-          },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-      } else {
-        // If no previous point, use the slope to create a tangent line
-        const angle = Math.atan(point.slope);
-
-        // Calculate direction considering aspect ratio
-        const dx = Math.cos(angle);
-        const dy = Math.sin(angle);
-
-        // Normalize considering aspect ratio
-        const adjustedDy = dy * aspectRatio;
-        const length = Math.sqrt(dx * dx + adjustedDy * adjustedDy);
-
-        const normDx = dx / length;
-        const normDy = adjustedDy / length;
-
-        // Calculate endpoints
-        const startX = point.x - normDx * halfLength;
-        const startY = point.y - (normDy * halfLength) / aspectRatio;
-        const endX = point.x + normDx * halfLength;
-        const endY = point.y + (normDy * halfLength) / aspectRatio;
-
-        slopeVisual.push({
-          x: [startX, endX],
-          y: [startY, endY],
-          type: "scattergl",
-          mode: "lines",
-          line: { color: "red", width: 3 },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-
-        // Add a marker at the current point
-        slopeVisual.push({
-          x: [point.x],
-          y: [point.y],
-          type: "scattergl",
-          mode: "markers",
-          marker: { color: "red", size: 8 },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-      }
-    }
+  let slopeVisual: any[] = [];
+  if (showSlopeTool) {
+    slopeMeasurements.forEach(m => {
+      const point = m.fixedPoint || (m.id === activeSlopeMeasurementId ? hoveredPoint : null);
+      if (!point || point.slope === undefined) return;
+      const xRange = currentLayout?.xaxis?.range;
+      const yRange = currentLayout?.yaxis?.range;
+      const xSpan = xRange ? Math.abs(parseFloat(xRange[1]) - parseFloat(xRange[0])) : 1;
+      const ySpan = yRange ? Math.abs(parseFloat(yRange[1]) - parseFloat(yRange[0])) : 1;
+      const slope = point.slope;
+      const targetNorm = (m.lineSize / 100) * Math.sqrt(2);
+      const dirFactor = Math.sqrt(Math.pow(1 / xSpan, 2) + Math.pow(slope / ySpan, 2));
+      const totalT = dirFactor > 0 ? targetNorm / dirFactor : 0;
+      const halfT = totalT / 2;
+      const startX = point.x - halfT;
+      const endX = point.x + halfT;
+      const startY = point.y - slope * halfT;
+      const endY = point.y + slope * halfT;
+      slopeVisual.push({
+        x: [startX, endX], y: [startY, endY],
+        type: "scattergl", mode: "lines",
+        line: { color: m.color, width: 3 },
+        showlegend: false, hoverinfo: "skip",
+        cliponaxis: false, xaxis: "x", yaxis: "y",
+      });
+      slopeVisual.push({
+        x: [point.x], y: [point.y],
+        type: "scattergl", mode: "markers",
+        marker: { color: m.color, size: 8 },
+        showlegend: false, hoverinfo: "skip",
+        cliponaxis: false, xaxis: "x", yaxis: "y",
+      });
+    });
   }
 
   // Prepare data for Plotly with zoom preservation and ALL data points
@@ -2224,19 +2229,19 @@ const DataComparisonApp = () => {
   const config = {
     responsive: true,
     displayModeBar: true,
-    modeBarButtonsToAdd: ["zoom2d", "pan2d", "resetScale2d"],
+    modeBarButtonsToAdd: ["zoom2d", "pan2d", "resetScale2d"] as any,
     plotGlPixelRatio: 2, // Increase rendering resolution
     showSendToCloud: false, // Reduce overhead
   };
 
   // Dataset box style that matches the mockup
-  const datasetBoxStyle = {
+  const datasetBoxStyle: React.CSSProperties = {
     border: "1px solid #00f",
     backgroundColor: "#def",
     padding: "8px",
     marginBottom: "10px",
     display: "inline-block",
-    width: "320px", // Increased width to ensure Reset button fits
+    width: "320px",
     verticalAlign: "top",
     marginRight: "5px",
     position: "relative",
@@ -2248,25 +2253,13 @@ const DataComparisonApp = () => {
       ...(currentLayout?.xaxis || {}),
       type: xAxisScale,
       title: currentLayout?.xaxis?.title || { text: axisTitles.xAxis },
-      // Lock range when slope tool is active
-      ...(showSlopeTool && currentLayout?.xaxis?.range
-        ? {
-            autorange: false,
-            range: currentLayout.xaxis.range,
-          }
-        : {}),
+      ...(currentLayout?.xaxis?.range ? { autorange: false, range: currentLayout.xaxis.range } : {}),
     },
     yaxis: {
       ...(currentLayout?.yaxis || {}),
       type: yAxisLeftScale,
       title: currentLayout?.yaxis?.title || { text: axisTitles.yAxisLeft },
-      // Lock range when slope tool is active
-      ...(showSlopeTool && currentLayout?.yaxis?.range
-        ? {
-            autorange: false,
-            range: currentLayout.yaxis.range,
-          }
-        : {}),
+      ...(currentLayout?.yaxis?.range ? { autorange: false, range: currentLayout.yaxis.range } : {}),
     },
     yaxis2: {
       ...(currentLayout?.yaxis2 || {}),
@@ -2274,13 +2267,7 @@ const DataComparisonApp = () => {
       title: currentLayout?.yaxis2?.title || { text: axisTitles.yAxisRight },
       overlaying: "y",
       side: "right",
-      // Lock range when slope tool is active
-      ...(showSlopeTool && currentLayout?.yaxis2?.range
-        ? {
-            autorange: false,
-            range: currentLayout.yaxis2.range,
-          }
-        : {}),
+      ...(currentLayout?.yaxis2?.range ? { autorange: false, range: currentLayout.yaxis2.range } : {}),
     },
     shapes: [
       // Keep your existing shapes code here
@@ -2310,8 +2297,20 @@ const DataComparisonApp = () => {
     ],
   };
 
+  // Calc point markers on the graph
+  const calcPointVisuals: any[] = calcPoints
+    .filter(p => p.x !== null)
+    .map(p => ({
+      x: [p.x], y: [p.y],
+      type: "scattergl" as const, mode: "markers+text" as const,
+      marker: { color: p.dotColor, size: p.dotSize },
+      text: [p.name], textposition: "top center" as const,
+      showlegend: false, hoverinfo: "text" as const,
+      name: p.name, xaxis: "x", yaxis: "y",
+    }));
+
   // Separate slope visuals to handle them differently
-  const mainData = [...plotlyData, ...integralVisuals];
+  const mainData = [...plotlyData, ...integralVisuals, ...calcPointVisuals];
   const allData = [...mainData];
 
   if (showSlopeTool && slopeVisual.length > 0) {
@@ -2323,6 +2322,50 @@ const DataComparisonApp = () => {
       });
     });
   }
+
+  // Reorder the dragged block so it takes the dropped block's position
+  const handleBlockDrop = (targetId: string) => {
+    if (!draggingBlock || draggingBlock === targetId) return;
+    setBlockOrder((prev) => {
+      const next = prev.filter((b) => b !== draggingBlock);
+      const targetIdx = next.indexOf(targetId);
+      next.splice(targetIdx, 0, draggingBlock);
+      return next;
+    });
+    setDraggingBlock(null);
+  };
+
+  // Props shared by every reorderable block wrapper (gray drag handle on the left)
+  const blockWrapperProps = (id: string) => ({
+    style: {
+      order: blockOrder.indexOf(id),
+      position: "relative" as const,
+      paddingLeft: "18px",
+      opacity: draggingBlock === id ? 0.5 : 1,
+    },
+    "data-block-id": id,
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+  });
+
+  // The gray vertical handle rendered inside each block wrapper
+  const blockHandle = (id: string) => (
+    <div
+      draggable
+      onDragStart={() => setDraggingBlock(id)}
+      onDragEnd={() => setDraggingBlock(null)}
+      title="Arrastra para reordenar este bloque"
+      style={{
+        position: "absolute",
+        left: 0,
+        top: "8px",
+        bottom: "8px",
+        width: "10px",
+        backgroundColor: "#bbb",
+        cursor: "grab",
+        borderRadius: "3px",
+      }}
+    />
+  );
 
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px" }}>
@@ -2351,7 +2394,31 @@ const DataComparisonApp = () => {
         />
       </div>
 
+      {/* Reorderable tool blocks: drag the gray handle on the left to reorder */}
+      <div style={{ display: "flex", flexDirection: "column" }}
+        onDragOver={(e: React.DragEvent) => e.preventDefault()}
+        onDrop={(e: React.DragEvent) => {
+          if (!draggingBlock) return;
+          const mouseY = e.clientY;
+          const blockEls = Array.from(document.querySelectorAll("[data-block-id]"));
+          let targetId: string | null = null;
+          let minDist = Infinity;
+          blockEls.forEach((el) => {
+            const rect = el.getBoundingClientRect();
+            const centerY = (rect.top + rect.bottom) / 2;
+            const dist = Math.abs(mouseY - centerY);
+            if (dist < minDist) {
+              minDist = dist;
+              targetId = (el as HTMLElement).dataset.blockId || null;
+            }
+          });
+          if (targetId) handleBlockDrop(targetId);
+          setDraggingBlock(null);
+        }}
+      >
       {/* NEW CURSOR CONTROL SECTION */}
+      <div {...blockWrapperProps("cursors")}>
+      {blockHandle("cursors")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2458,7 +2525,10 @@ const DataComparisonApp = () => {
           </label>
         </div>
       </div>
+      </div>
 
+      <div {...blockWrapperProps("dataSeries")}>
+      {blockHandle("dataSeries")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2754,7 +2824,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Slope Visualization Tool */}
+      <div {...blockWrapperProps("slope")}>
+      {blockHandle("slope")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2762,92 +2836,92 @@ const DataComparisonApp = () => {
           marginBottom: "20px",
         }}
       >
-        <div style={{ fontWeight: "bold", marginBottom: "10px" }}>
-          Slope (Derivative)
+        <div style={{ fontWeight: "bold", marginBottom: "10px" }}>Slope (Derivative)</div>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showSlopeTool}
+              onChange={(e) => setShowSlopeTool(e.target.checked)}
+              style={{ marginRight: "5px" }}
+            />
+            Enable slope tool
+          </label>
         </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "20px",
-            flexWrap: "wrap",
+        {slopeMeasurements.map(m => (
+          <div key={m.id} style={{
+            border: `2px solid ${m.color}`,
+            backgroundColor: "#fff9f9",
+            padding: "10px",
+            marginBottom: "10px",
+            position: "relative",
+            cursor: "pointer",
+            outline: m.id === activeSlopeMeasurementId ? `3px solid ${m.color}` : "none",
+            outlineOffset: "1px",
           }}
-        >
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ marginRight: "10px" }}>Slope value:</label>
-            <input
-              type="text"
-              value={currentSlope !== null ? currentSlope.toFixed(6) : "N/A"}
-              readOnly
-              style={{ width: "120px", backgroundColor: "#f0f0f0" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ marginRight: "10px" }}>Line size:</label>
-            <input
-              type="number"
-              value={slopeLineSize}
-              onChange={(e) =>
-                setSlopeLineSize(parseFloat(e.target.value) || 1)
-              }
-              style={{ width: "80px" }}
-              min="0.1"
-              step="0.1"
-            />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ marginRight: "10px" }}>Smoothing points:</label>
-            <input
-              type="number"
-              value={slopeSmoothingPoints}
-              onChange={(e) => {
-                const value = parseInt(e.target.value) || 1;
-                setSlopeSmoothingPoints(Math.max(1, value));
-              }}
-              style={{ width: "60px" }}
-              min="1"
-              step="2"
-              title="Number of points to average for slope calculation"
-            />
-          </div>
-
-          <div>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={showSlopeTool}
-                onChange={(e) => setShowSlopeTool(e.target.checked)}
-                style={{ marginRight: "5px" }}
-              />
-              Enable slope tool
-            </label>
-          </div>
-        </div>
-
-        {showSlopeTool && (
-          <div style={{ marginTop: "10px", fontSize: "12px", color: "#666" }}>
-            {fixedPoint
-              ? "Click on another point to change position, or disable and re-enable the tool to reset."
-              : "Hover over a curve to see the derivative. Click to fix the position."}
-            {slopeSmoothingPoints > 1 && (
-              <div style={{ marginTop: "5px" }}>
-                Smoothing: Using {Math.floor(slopeSmoothingPoints / 2)} points
-                before and after the cursor position.
+          onClick={() => setActiveSlopeMeasurementId(m.id)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <label>Name:</label>
+                <input type="text" value={m.name}
+                  onChange={(e) => { e.stopPropagation(); updateSlopeMeasurement(m.id, { name: e.target.value }); }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: "90px" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <label>Color:</label>
+                <input type="color" value={m.color}
+                  onChange={(e) => { e.stopPropagation(); updateSlopeMeasurement(m.id, { color: e.target.value }); }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: "40px", height: "24px", border: "none", cursor: "pointer" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <label>Smoothing:</label>
+                <input type="number" value={m.smoothingPoints} min="1" step="2"
+                  onChange={(e) => { e.stopPropagation(); updateSlopeMeasurement(m.id, { smoothingPoints: parseInt(e.target.value) || 1 }); }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: "55px" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <label>Line (%):</label>
+                <input type="number" value={m.lineSize} min="1" step="1"
+                  onChange={(e) => { e.stopPropagation(); updateSlopeMeasurement(m.id, { lineSize: parseFloat(e.target.value) || 1 }); }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: "55px" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <label>Value:</label>
+                <input type="text" readOnly
+                  value={m.id === activeSlopeMeasurementId && hoveredPoint && !m.fixedPoint
+                    ? hoveredPoint.slope.toFixed(6)
+                    : m.value !== null ? (m.value as number).toFixed(6) : "N/A"}
+                  style={{ width: "110px", backgroundColor: "#f0f0f0" }} />
+              </div>
+              {m.fixedPoint && (
+                <button onClick={(e) => { e.stopPropagation(); updateSlopeMeasurement(m.id, { fixedPoint: null, value: null }); }}
+                  style={{ fontSize: "11px" }}>Clear</button>
+              )}
+            </div>
+            {m.id === activeSlopeMeasurementId && showSlopeTool && (
+              <div style={{ fontSize: "11px", color: "#888", marginTop: "5px" }}>
+                {m.fixedPoint ? "Click a curve to reposition, or click Clear to reset." : "Active — hover over a curve to see slope. Click to fix."}
               </div>
             )}
+            {slopeMeasurements.length > 1 && (
+              <button onClick={(e) => { e.stopPropagation(); removeSlopeMeasurement(m.id); }}
+                style={{ position: "absolute", right: "8px", top: "8px", background: "transparent", border: "none", color: "red", fontSize: "18px", cursor: "pointer" }}>
+                ✕
+              </button>
+            )}
           </div>
-        )}
+        ))}
+        <button onClick={addSlopeMeasurement} style={{ marginTop: "5px" }}>Add Slope</button>
+      </div>
       </div>
 
+      <div {...blockWrapperProps("combined")}>
+      {blockHandle("combined")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2961,7 +3035,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* === NEW CUSTOM EQUATION BLOCK === */}
+      <div {...blockWrapperProps("customEq")}>
+      {blockHandle("customEq")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3045,7 +3123,10 @@ const DataComparisonApp = () => {
         ))}
       </div>
       {/* === END CUSTOM EQUATION BLOCK === */}
+      </div>
 
+      <div {...blockWrapperProps("axisTitles")}>
+      {blockHandle("axisTitles")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3153,7 +3234,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Export to CSV section */}
+      <div {...blockWrapperProps("export")}>
+      {blockHandle("export")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3194,7 +3279,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Integral Section */}
+      <div {...blockWrapperProps("integral")}>
+      {blockHandle("integral")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3270,7 +3359,89 @@ const DataComparisonApp = () => {
           Add Integral
         </button>
       </div>
+      </div>
+
+      {/* Calculations Section */}
+      <div {...blockWrapperProps("calculations")}>
+      {blockHandle("calculations")}
+      <div style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "20px" }}>
+        <div style={{ fontWeight: "bold", marginBottom: "10px" }}>Calculations</div>
+
+        <div style={{ marginBottom: "15px" }}>
+          <div style={{ fontWeight: "500", marginBottom: "8px", paddingBottom: "4px", borderBottom: "1px solid #eee" }}>Points</div>
+          {calcPoints.map(p => (
+            <div key={p.id} style={{ border: "1px solid #aad", backgroundColor: "#f0f4ff", padding: "8px", marginBottom: "6px", position: "relative" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <label>Name:</label>
+                  <input type="text" value={p.name} onChange={(e) => updateCalcPoint(p.id, { name: e.target.value })} style={{ width: "70px" }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <label>Color:</label>
+                  <input type="color" value={p.dotColor} onChange={(e) => updateCalcPoint(p.id, { dotColor: e.target.value })} style={{ width: "40px", height: "24px", border: "none" }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <label>Size:</label>
+                  <input type="number" value={p.dotSize} min="2" max="30" onChange={(e) => updateCalcPoint(p.id, { dotSize: parseInt(e.target.value) || 8 })} style={{ width: "50px" }} />
+                </div>
+                <span>X: <b>{p.x !== null ? (p.x as number).toFixed(4) : "—"}</b></span>
+                <span>Y: <b>{p.y !== null ? (p.y as number).toFixed(4) : "—"}</b></span>
+                <button
+                  onClick={() => setSelectingCalcPointId(prev => prev === p.id ? null : p.id)}
+                  style={{ backgroundColor: selectingCalcPointId === p.id ? "#4CAF50" : "", color: selectingCalcPointId === p.id ? "white" : "" }}
+                >
+                  {selectingCalcPointId === p.id ? "Click on graph..." : "Pick point"}
+                </button>
+              </div>
+              <button onClick={() => removeCalcPoint(p.id)} style={{ position: "absolute", right: "8px", top: "8px", background: "transparent", border: "none", color: "red", fontSize: "16px", cursor: "pointer" }}>✕</button>
+            </div>
+          ))}
+          <button onClick={addCalcPoint}>Add Point</button>
+        </div>
+
+        <div>
+          <div style={{ fontWeight: "500", marginBottom: "8px", paddingBottom: "4px", borderBottom: "1px solid #eee" }}>Expressions</div>
+          <div style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
+            Use point names (e.g. <code>P1.x</code>, <code>P1.y</code>), slope names (e.g. <code>slope1</code>), or previous result names. Operators: +, -, *, /, ** (power). Math: sin, cos, sqrt, pow, abs, log, exp.
+          </div>
+          {(() => {
+            const evaluated = evaluateCalcExpressions(calcExpressions, calcPoints, slopeMeasurements);
+            return evaluated.map((expr) => (
+              <div key={expr.id} style={{ border: "1px solid #aaa", backgroundColor: "#fffff0", padding: "8px", marginBottom: "6px", position: "relative" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <label>Name:</label>
+                    <input type="text" value={expr.name}
+                      onChange={(e) => setCalcExpressions(prev => prev.map(ex => ex.id === expr.id ? { ...ex, name: e.target.value } : ex))}
+                      style={{ width: "80px" }} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <label>Expression:</label>
+                    <input type="text" value={expr.expression} placeholder="e.g. P1.y / slope1"
+                      onChange={(e) => setCalcExpressions(prev => prev.map(ex => ex.id === expr.id ? { ...ex, expression: e.target.value } : ex))}
+                      style={{ width: "200px" }} />
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <label>Result:</label>
+                    <input type="text" readOnly
+                      value={expr.result !== null && expr.result !== undefined
+                        ? (typeof expr.result === "number" ? (expr.result as number).toFixed(6) : String(expr.result))
+                        : "—"}
+                      style={{ width: "120px", backgroundColor: "#f0f0f0" }} />
+                  </div>
+                </div>
+                <button onClick={() => removeCalcExpression(expr.id)} style={{ position: "absolute", right: "8px", top: "8px", background: "transparent", border: "none", color: "red", fontSize: "16px", cursor: "pointer" }}>✕</button>
+              </div>
+            ));
+          })()}
+          <button onClick={addCalcExpression}>Add Expression</button>
+        </div>
+      </div>
+      </div>
+
       {/* Axis Scale Toggle Section */}
+      <div {...blockWrapperProps("axisScale")}>
+      {blockHandle("axisScale")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3359,6 +3530,9 @@ const DataComparisonApp = () => {
           </div>
         </div>
       </div>
+      </div>
+      </div>
+      {/* end reorderable tool blocks */}
     </div>
   );
 };
