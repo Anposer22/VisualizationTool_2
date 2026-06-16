@@ -1,0 +1,26 @@
+/* App.css */
+.App {
+  font-family: Arial, sans-serif;
+}
+
+/* Remove default button styling */
+button {
+  cursor: pointer;
+}
+
+/* Make inputs and selects consistent */
+input,
+select {
+  box-sizing: border-box;
+}
+
+/* Override any browser default margins */
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* Make drag and drop smooth */
+[draggable="true"] {
+  cursor: move;
+}
