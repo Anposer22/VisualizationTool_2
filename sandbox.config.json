@@ -1,3 +1,4 @@
 {
-  "infiniteLoopProtection": false
+  "infiniteLoopProtection": false,
+  "template": "create-react-app-typescript"
 }
