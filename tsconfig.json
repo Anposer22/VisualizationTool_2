@@ -13,6 +13,7 @@
             "es2015.collection"
         ],
         "jsx": "react-jsx",
-        "downlevelIteration": true
+        "downlevelIteration": true,
+        "skipLibCheck": true
     }
 }
