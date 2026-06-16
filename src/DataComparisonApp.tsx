@@ -334,7 +334,7 @@ const DataImportForm = ({
 
 const DataComparisonApp = () => {
   // All state variables defined at the top
-  const [datasets, setDatasets] = useState([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [showImportForm, setShowImportForm] = useState(false);
   const [xOffsets, setXOffsets] = useState({});
   const [axisTitles, setAxisTitles] = useState({
@@ -346,12 +346,12 @@ const DataComparisonApp = () => {
   const [exportFilename, setExportFilename] = useState("Zoomed in data");
   const plotRef = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
-  const [currentLayout, setCurrentLayout] = useState(null);
+  const [currentLayout, setCurrentLayout] = useState<any>(null);
 
   // New state for cursor functionality
   const [showCursors, setShowCursors] = useState(false);
-  const [cursor1, setCursor1] = useState(null);
-  const [cursor2, setCursor2] = useState(null);
+  const [cursor1, setCursor1] = useState<number | null>(null);
+  const [cursor2, setCursor2] = useState<number | null>(null);
   const [cursorStep, setCursorStep] = useState(0.001);
 
   // State variables for axis scale types
@@ -1808,7 +1808,7 @@ const DataComparisonApp = () => {
   };
 
   // Add integral visuals (shaded areas and cursors)
-  let integralVisuals = [];
+  let integralVisuals: any[] = [];
 
   if (showCursors && cursor1 !== null && cursor2 !== null) {
     // Get all visible datasets for potentially shading
@@ -2376,9 +2376,9 @@ const DataComparisonApp = () => {
               type="text"
               value={formatScientificNotation(cursorStep)}
               onChange={(e) => {
-                let newStep = e.target.value;
+                let newStep: number;
                 try {
-                  newStep = parseFloat(newStep);
+                  newStep = parseFloat(e.target.value);
                   if (isNaN(newStep)) newStep = 0.001;
                 } catch (err) {
                   newStep = 0.001;
@@ -2486,6 +2486,8 @@ const DataComparisonApp = () => {
             exportOption={exportOption}
             setExportOption={setExportOption}
             exportToCSV={exportToCSV}
+            exportFilename={exportFilename}
+            setExportFilename={setExportFilename}
           />
         )}
 
@@ -2542,7 +2544,7 @@ const DataComparisonApp = () => {
                       input.value = dataset.color;
 
                       // Position it right next to the color box that was clicked
-                      const rect = e.target.getBoundingClientRect();
+                      const rect = (e.target as HTMLElement).getBoundingClientRect();
                       input.style.position = "absolute";
                       input.style.left = `${rect.right + 5}px`;
                       input.style.top = `${rect.top}px`;
@@ -2557,7 +2559,7 @@ const DataComparisonApp = () => {
 
                       // Handle color change
                       input.addEventListener("change", (e) => {
-                        updateDataset(dataset.id, { color: e.target.value });
+                        updateDataset(dataset.id, { color: (e.target as HTMLInputElement).value });
                         if (!inputRemoved) {
                           document.body.removeChild(input);
                           inputRemoved = true;
@@ -2650,9 +2652,9 @@ const DataComparisonApp = () => {
                     type="text"
                     value={formatScientificNotation(dataset.step || "0.001")}
                     onChange={(e) => {
-                      let newStep = e.target.value;
+                      let newStep: number;
                       try {
-                        newStep = parseFloat(newStep);
+                        newStep = parseFloat(e.target.value);
                         if (isNaN(newStep)) newStep = 0.001;
                       } catch (err) {
                         newStep = 0.001;
@@ -2945,7 +2947,7 @@ const DataComparisonApp = () => {
                 </td>
               </tr>
               <tr>
-                <td colSpan="2" style={{ paddingTop: "5px" }}>
+                <td colSpan={2} style={{ paddingTop: "5px" }}>
                   <button
                     onClick={createCombinedDataset}
                     disabled={datasets.length < 1}
