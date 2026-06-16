@@ -363,9 +363,25 @@ const DataComparisonApp = () => {
 
   // Slope tool state
   const [showSlope, setShowSlope] = useState(false);
-  const [slopeLineSize, setSlopeLineSize] = useState(2000);
+  // Line size is interpreted as a percentage of the current viewport diagonal
+  const [slopeLineSize, setSlopeLineSize] = useState(50);
   const [slopeSmoothingPoints, setSlopeSmoothingPoints] = useState(1);
   const [showSlopeTool, setShowSlopeTool] = useState(false);
+
+  // Order of the reorderable tool blocks (drag the gray handle on the left)
+  const [blockOrder, setBlockOrder] = useState<string[]>([
+    "cursors",
+    "dataSeries",
+    "slope",
+    "combined",
+    "customEq",
+    "axisTitles",
+    "export",
+    "integral",
+    "axisScale",
+  ]);
+  const [draggingBlock, setDraggingBlock] = useState<string | null>(null);
+
   const [currentSlope, setCurrentSlope] = useState<number | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
   const [fixedPoint, setFixedPoint] = useState<any>(null);
@@ -2011,49 +2027,56 @@ const DataComparisonApp = () => {
   if (showSlopeTool && (hoveredPoint || fixedPoint)) {
     const point = fixedPoint || hoveredPoint;
     if (point && point.slope !== undefined) {
-      // Get aspect ratio for proper visualization
-      const aspectRatio = getAspectRatioCorrection();
+      // The slope line keeps a CONSTANT visual length, independent of the
+      // point position and of the slope value. Its length is a percentage
+      // (slopeLineSize) of the current viewport diagonal.
+      //
+      // We treat the visible plot area as a square: the X span maps to 1 unit
+      // of normalized width and the Y span to 1 unit of normalized height, so
+      // the viewport diagonal is sqrt(2). For a data step (t, slope * t) the
+      // normalized on-screen length is t * sqrt((1/xSpan)^2 + (slope/ySpan)^2).
+      // We solve t so the full line spans (slopeLineSize / 100) * sqrt(2).
+      const xRange = currentLayout?.xaxis?.range;
+      const yRange = currentLayout?.yaxis?.range;
+      const xSpan = xRange
+        ? Math.abs(parseFloat(xRange[1]) - parseFloat(xRange[0]))
+        : 1;
+      const ySpan = yRange
+        ? Math.abs(parseFloat(yRange[1]) - parseFloat(yRange[0]))
+        : 1;
 
-      // The line should have constant visual length
-      // Scale the line size to be more reasonable (divide by 10 for better default scale)
-      const totalLineLength = slopeLineSize * 10000;
-      const halfLength = totalLineLength / 2;
+      const slope = point.slope;
+      const targetNorm = (slopeLineSize / 100) * Math.sqrt(2);
+      const dirFactor = Math.sqrt(
+        Math.pow(1 / xSpan, 2) + Math.pow(slope / ySpan, 2)
+      );
+      const totalT = dirFactor > 0 ? targetNorm / dirFactor : 0;
+      const halfT = totalT / 2;
 
-      // Vector from previous to current point
-      const dx = point.x - point.previousX;
-      const dy = point.y - point.previousY;
+      const startX = point.x - halfT;
+      const endX = point.x + halfT;
+      const startY = point.y - slope * halfT;
+      const endY = point.y + slope * halfT;
 
-      // If we have a real previous point (not the same as current)
-      if (dx !== 0 || dy !== 0) {
-        // Normalize the direction considering aspect ratio
-        const adjustedDy = dy * aspectRatio;
-        const length = Math.sqrt(dx * dx + adjustedDy * adjustedDy);
+      // Add the slope line
+      slopeVisual.push({
+        x: [startX, endX],
+        y: [startY, endY],
+        type: "scattergl",
+        mode: "lines",
+        line: { color: "red", width: 3 },
+        showlegend: false,
+        hoverinfo: "skip",
+        cliponaxis: false,
+        xaxis: "x",
+        yaxis: "y",
+      });
 
-        // Normalized direction components
-        const normDx = dx / length;
-        const normDy = adjustedDy / length;
-
-        // Calculate endpoints maintaining constant visual length
-        const startX = point.x - normDx * halfLength;
-        const startY = point.y - (normDy * halfLength) / aspectRatio;
-        const endX = point.x + normDx * halfLength;
-        const endY = point.y + (normDy * halfLength) / aspectRatio;
-
-        // Add the slope line
-        slopeVisual.push({
-          x: [startX, endX],
-          y: [startY, endY],
-          type: "scattergl",
-          mode: "lines",
-          line: { color: "red", width: 3 },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-
-        // Add markers for the two reference points
+      // Add reference markers
+      if (
+        point.previousX !== undefined &&
+        (point.previousX !== point.x || point.previousY !== point.y)
+      ) {
         slopeVisual.push({
           x: [point.previousX, point.x],
           y: [point.previousY, point.y],
@@ -2071,40 +2094,6 @@ const DataComparisonApp = () => {
           yaxis: "y",
         });
       } else {
-        // If no previous point, use the slope to create a tangent line
-        const angle = Math.atan(point.slope);
-
-        // Calculate direction considering aspect ratio
-        const dx = Math.cos(angle);
-        const dy = Math.sin(angle);
-
-        // Normalize considering aspect ratio
-        const adjustedDy = dy * aspectRatio;
-        const length = Math.sqrt(dx * dx + adjustedDy * adjustedDy);
-
-        const normDx = dx / length;
-        const normDy = adjustedDy / length;
-
-        // Calculate endpoints
-        const startX = point.x - normDx * halfLength;
-        const startY = point.y - (normDy * halfLength) / aspectRatio;
-        const endX = point.x + normDx * halfLength;
-        const endY = point.y + (normDy * halfLength) / aspectRatio;
-
-        slopeVisual.push({
-          x: [startX, endX],
-          y: [startY, endY],
-          type: "scattergl",
-          mode: "lines",
-          line: { color: "red", width: 3 },
-          showlegend: false,
-          hoverinfo: "skip",
-          cliponaxis: false,
-          xaxis: "x",
-          yaxis: "y",
-        });
-
-        // Add a marker at the current point
         slopeVisual.push({
           x: [point.x],
           y: [point.y],
@@ -2324,6 +2313,50 @@ const DataComparisonApp = () => {
     });
   }
 
+  // Reorder the dragged block so it takes the dropped block's position
+  const handleBlockDrop = (targetId: string) => {
+    if (!draggingBlock || draggingBlock === targetId) return;
+    setBlockOrder((prev) => {
+      const next = prev.filter((b) => b !== draggingBlock);
+      const targetIdx = next.indexOf(targetId);
+      next.splice(targetIdx, 0, draggingBlock);
+      return next;
+    });
+    setDraggingBlock(null);
+  };
+
+  // Props shared by every reorderable block wrapper (gray drag handle on the left)
+  const blockWrapperProps = (id: string) => ({
+    style: {
+      order: blockOrder.indexOf(id),
+      position: "relative" as const,
+      paddingLeft: "18px",
+      opacity: draggingBlock === id ? 0.5 : 1,
+    },
+    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDrop: () => handleBlockDrop(id),
+  });
+
+  // The gray vertical handle rendered inside each block wrapper
+  const blockHandle = (id: string) => (
+    <div
+      draggable
+      onDragStart={() => setDraggingBlock(id)}
+      onDragEnd={() => setDraggingBlock(null)}
+      title="Arrastra para reordenar este bloque"
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: "10px",
+        backgroundColor: "#bbb",
+        cursor: "grab",
+        borderRadius: "3px",
+      }}
+    />
+  );
+
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px" }}>
       {/* Title */}
@@ -2351,7 +2384,11 @@ const DataComparisonApp = () => {
         />
       </div>
 
+      {/* Reorderable tool blocks: drag the gray handle on the left to reorder */}
+      <div style={{ display: "flex", flexDirection: "column" }}>
       {/* NEW CURSOR CONTROL SECTION */}
+      <div {...blockWrapperProps("cursors")}>
+      {blockHandle("cursors")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2458,7 +2495,10 @@ const DataComparisonApp = () => {
           </label>
         </div>
       </div>
+      </div>
 
+      <div {...blockWrapperProps("dataSeries")}>
+      {blockHandle("dataSeries")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2754,7 +2794,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Slope Visualization Tool */}
+      <div {...blockWrapperProps("slope")}>
+      {blockHandle("slope")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2785,7 +2829,7 @@ const DataComparisonApp = () => {
           </div>
 
           <div style={{ display: "flex", alignItems: "center" }}>
-            <label style={{ marginRight: "10px" }}>Line size:</label>
+            <label style={{ marginRight: "10px" }}>Line size (% of view):</label>
             <input
               type="number"
               value={slopeLineSize}
@@ -2793,9 +2837,11 @@ const DataComparisonApp = () => {
                 setSlopeLineSize(parseFloat(e.target.value) || 1)
               }
               style={{ width: "80px" }}
-              min="0.1"
-              step="0.1"
+              min="1"
+              step="1"
+              title="Length of the slope line as a percentage of the current viewport diagonal"
             />
+            <span style={{ marginLeft: "4px" }}>%</span>
           </div>
 
           <div style={{ display: "flex", alignItems: "center" }}>
@@ -2847,7 +2893,10 @@ const DataComparisonApp = () => {
           </div>
         )}
       </div>
+      </div>
 
+      <div {...blockWrapperProps("combined")}>
+      {blockHandle("combined")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -2961,7 +3010,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* === NEW CUSTOM EQUATION BLOCK === */}
+      <div {...blockWrapperProps("customEq")}>
+      {blockHandle("customEq")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3045,7 +3098,10 @@ const DataComparisonApp = () => {
         ))}
       </div>
       {/* === END CUSTOM EQUATION BLOCK === */}
+      </div>
 
+      <div {...blockWrapperProps("axisTitles")}>
+      {blockHandle("axisTitles")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3153,7 +3209,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Export to CSV section */}
+      <div {...blockWrapperProps("export")}>
+      {blockHandle("export")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3194,7 +3254,11 @@ const DataComparisonApp = () => {
         </div>
       </div>
 
+      </div>
+
       {/* Integral Section */}
+      <div {...blockWrapperProps("integral")}>
+      {blockHandle("integral")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3270,7 +3334,11 @@ const DataComparisonApp = () => {
           Add Integral
         </button>
       </div>
+      </div>
+
       {/* Axis Scale Toggle Section */}
+      <div {...blockWrapperProps("axisScale")}>
+      {blockHandle("axisScale")}
       <div
         style={{
           border: "1px solid #ccc",
@@ -3359,6 +3427,9 @@ const DataComparisonApp = () => {
           </div>
         </div>
       </div>
+      </div>
+      </div>
+      {/* end reorderable tool blocks */}
     </div>
   );
 };
